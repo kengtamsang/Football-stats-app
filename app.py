@@ -1,120 +1,110 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta, timezone
+import pandas as pd
+from datetime import datetime, timezone, timedelta
 
-st.set_page_config(page_title="AI Football Analyzer", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="AI Football Statistics & Fixtures", page_icon="⚽", layout="wide")
 
-st.title("⚽ AI Football Analyzer")
+st.title("⚽ AI Football Statistics & Season Tracker")
 
-# ดึง API Token จาก Streamlit Secrets
 api_token = st.secrets.get("FOOTBALL_API_TOKEN", "")
-
 if not api_token:
-    st.error("กรุณาตั้งค่า FOOTBALL_API_TOKEN ใน Streamlit Secrets ก่อนใช้งาน")
+    st.error("กรุณาตั้งค่า FOOTBALL_API_TOKEN ใน Streamlit Secrets")
     st.stop()
 
-# ตั้งค่าเวลาไทย (UTC+7)
 tz_th = timezone(timedelta(hours=7))
-now_th = datetime.now(tz_th)
-
-# ---------------- Sidebar สำหรับการตั้งค่า ----------------
-st.sidebar.header("⚙️ ตัวกรองข้อมูล")
-
-# เลือกช่วงเวลาที่ต้องการดูข้อมูล
-days_back = st.sidebar.slider("ดึงผลย้อนหลัง (วัน)", min_value=1, max_value=14, value=3)
-days_ahead = st.sidebar.slider("ดึงตารางแข่งล่วงหน้า (วัน)", min_value=1, max_value=14, value=5)
-
-date_from = (now_th - timedelta(days=days_back)).strftime('%Y-%m-%d')
-date_to = (now_th + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
-
-st.caption(f"📅 แสดงข้อมูลตั้งแต่วันที่ **{date_from}** ถึง **{date_to}** (อัปเดตล่าสุด: {now_th.strftime('%H:%M น.')})")
-
-# ---------------- ดึงข้อมูลจาก API ----------------
 headers = {"X-Auth-Token": api_token}
-url = f"https://api.football-data.org/v4/matches?dateFrom={date_from}&dateTo={date_to}"
 
-@st.cache_data(ttl=300)  # บันทึก Cache 5 นาทีเพื่อป้องกัน API Rate Limit
-def fetch_matches(api_url, headers_data):
-    res = requests.get(api_url, headers=headers_data)
+# รหัสลีกยอดนิยมใน API ฟรี
+LEAGUES = {
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": "PL",
+    "🇪🇸 La Liga": "PD",
+    "🇩🇪 Bundesliga": "BL1",
+    "🇮🇹 Serie A": "SA",
+    "🇫🇷 Ligue 1": "FL1",
+    "🏆 UEFA Champions League": "CL"
+}
+
+st.sidebar.header("⚙️ ตัวเลือกข้อมูล")
+selected_league_name = st.sidebar.selectbox("เลือกลีกที่ต้องการดู", list(LEAGUES.keys()))
+league_code = LEAGUES[selected_league_name]
+
+# ฟังก์ชันดึงข้อมูลแมตช์ทั้งหมดในฤดูกาลของลีกนั้น
+@st.cache_data(ttl=1800) # บันทึกข้อมูลไว้ 30 นาที
+def get_season_matches(code):
+    url = f"https://api.football-data.org/v4/competitions/{code}/matches"
+    res = requests.get(url, headers=headers)
     if res.status_code == 200:
         return res.json().get("matches", [])
     return []
 
-try:
-    matches = fetch_matches(url, headers)
-    
-    if not matches:
-        st.info("ไม่พบรายการแข่งขันในช่วงเวลาที่เลือก")
-    else:
-        # จัดกลุ่มแมตช์ตามลีก (Competition)
-        leagues = {}
-        for match in matches:
-            comp_name = match.get("competition", {}).get("name", "รายการอื่นๆ")
-            if comp_name not in leagues:
-                leagues[comp_name] = []
-            leagues[comp_name].append(match)
+matches = get_season_matches(league_code)
 
-        # ตัวเลือกกรองลีกใน Sidebar
-        all_leagues = list(leagues.keys())
-        selected_leagues = st.sidebar.multiselect("เลือกลีกที่ต้องการดู", all_leagues, default=all_leagues)
+if not matches:
+    st.warning("ไม่สามารถดึงข้อมูลลีกนี้ได้ หรือเกินโควต้า API ชั่วคราว (ลองรีเฟรชในอีก 1 นาที)")
+else:
+    # แปลงข้อมูลเป็น List เพื่อทำ DataFrame
+    data_list = []
+    matchdays = set()
 
-        # แสดงข้อมูลแยกตามลีก
-        for comp_name in selected_leagues:
-            comp_matches = leagues[comp_name]
+    for m in matches:
+        matchday = m.get("matchday", 0)
+        if matchday:
+            matchdays.add(matchday)
             
-            with st.expander(f"🏆 **{comp_name}** ({len(comp_matches)} รายการ)", expanded=True):
-                
-                # แยกหมวดหมู่ย่อย: จบแล้ว / กำลังแข่ง / อนาคต
-                finished = []
-                live = []
-                upcoming = []
+        utc_date = m.get("utcDate", "")
+        if utc_date:
+            utc_dt = datetime.strptime(utc_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            local_time = utc_dt.astimezone(tz_th).strftime("%d/%m/%Y %H:%M")
+        else:
+            local_time = "-"
 
-                for m in comp_matches:
-                    status = m.get("status", "")
-                    if status in ["FINISHED", "AWARDED"]:
-                        finished.append(m)
-                    elif status in ["IN_PLAY", "PAUSED", "HALFTIME"]:
-                        live.append(m)
-                    else:
-                        upcoming.append(m)
+        status = m.get("status", "")
+        home = m["homeTeam"]["name"]
+        away = m["awayTeam"]["name"]
+        
+        score_home = m["score"]["fullTime"]["home"]
+        score_away = m["score"]["fullTime"]["away"]
+        
+        if status == "FINISHED":
+            score_str = f"{score_home} - {score_away}"
+            status_th = "จบแล้ว"
+        elif status in ["IN_PLAY", "PAUSED", "HALFTIME"]:
+            score_str = f"{score_home} - {score_away}"
+            status_th = "🔴 กำลังแข่ง"
+        else:
+            score_str = "vs"
+            status_th = "⏳ รอนัดเตะ"
 
-                # 🔴 1. แมตช์ที่กำลังแข่งขัน (Live)
-                if live:
-                    st.markdown("##### 🔴 กำลังแข่งขันสด")
-                    for m in live:
-                        home = m["homeTeam"]["name"]
-                        away = m["awayTeam"]["name"]
-                        score_h = m["score"]["fullTime"]["home"]
-                        score_a = m["score"]["fullTime"]["away"]
-                        st.warning(f"🔥 **{home}** `{score_h} - {score_a}` **{away}** | สถานะ: LIVE")
+        data_list.append({
+            "นัดที่ (Matchday)": matchday,
+            "วัน-เวลา (ไทย)": local_time,
+            "ทีมเหย้า": home,
+            "ผล / เวลา": score_str,
+            "ทีมเยือน": away,
+            "สถานะ": status_th
+        })
 
-                # ✅ 2. ผลการแข่งขันที่ผ่านมา (Finished)
-                if finished:
-                    st.markdown("##### ✅ ผลการแข่งขันย้อนหลัง")
-                    for m in finished:
-                        home = m["homeTeam"]["name"]
-                        away = m["awayTeam"]["name"]
-                        score_h = m["score"]["fullTime"]["home"]
-                        score_a = m["score"]["fullTime"]["away"]
-                        
-                        # แปลงเวลา
-                        utc_dt = datetime.strptime(m["utcDate"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                        m_time = utc_dt.astimezone(tz_th).strftime("%d/%m %H:%M น.")
-                        
-                        st.write(f"🟢 `{m_time}` | **{home}** `{score_h} - {score_a}` **{away}**")
+    df = pd.DataFrame(data_list)
 
-                # 📅 3. โปรแกรมการแข่งขันในอนาคต (Upcoming)
-                if upcoming:
-                    st.markdown("##### 📅 โปรแกรมแข่งล่วงหน้า")
-                    for m in upcoming:
-                        home = m["homeTeam"]["name"]
-                        away = m["awayTeam"]["name"]
-                        
-                        # แปลงเวลา
-                        utc_dt = datetime.strptime(m["utcDate"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                        m_time = utc_dt.astimezone(tz_th).strftime("%d/%m/%Y %H:%M น.")
-                        
-                        st.write(f"⏳ `{m_time}` | **{home}** vs **{away}**")
+    # ตัวกรองใน Sidebar: เลือกดูเฉพาะนัดที่ (Matchday) หรือดูทั้งหมด
+    st.sidebar.markdown("---")
+    view_option = st.sidebar.radio("รูปแบบการแสดงผล", ["แสดงทั้งหมดทั้งฤดูกาล", "กรองตามนัดที่ (Matchday)", "กรองตามสถานะ"])
 
-except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+    st.subheader(f"📊 ตารางการแข่งขัน {selected_league_name}")
+
+    if view_option == "กรองตามนัดที่ (Matchday)":
+        sorted_matchdays = sorted(list(matchdays))
+        selected_md = st.sidebar.selectbox("เลือกนัดที่ (Matchday)", sorted_matchdays)
+        filtered_df = df[df["นัดที่ (Matchday)"] == selected_md]
+        st.write(f"### นัดที่ {selected_md}")
+        st.dataframe(filtered_df.drop(columns=["นัดที่ (Matchday)"]), use_container_width=True, hide_index=True)
+
+    elif view_option == "กรองตามสถานะ":
+        status_choice = st.sidebar.selectbox("เลือกสถานะ", ["จบแล้ว", "⏳ รอนัดเตะ", "🔴 กำลังแข่ง"])
+        filtered_df = df[df["สถานะ"] == status_choice]
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+    else:
+        # แสดงตารางทั้งหมด
+        st.dataframe(df, use_container_width=True, hide_index=True)
