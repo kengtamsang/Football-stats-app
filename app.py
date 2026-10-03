@@ -17,20 +17,20 @@ headers = {"X-Auth-Token": api_token}
 
 # รหัสลีกยอดนิยมใน API ฟรี
 LEAGUES = {
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": "PL",
-    "🇪🇸 La Liga": "PD",
-    "🇩🇪 Bundesliga": "BL1",
-    "🇮🇹 Serie A": "SA",
-    "🇫🇷 Ligue 1": "FL1",
-    "🏆 UEFA Champions League": "CL"
+    "Premier League (อังกฤษ)": "PL",
+    "La Liga (สเปน)": "PD",
+    "Bundesliga (เยอรมนี)": "BL1",
+    "Serie A (อิตาลี)": "SA",
+    "Ligue 1 (ฝรั่งเศส)": "FL1",
+    "UEFA Champions League": "CL"
 }
 
-st.sidebar.header("⚙️ ตัวเลือกข้อมูล")
+st.sidebar.header("ตัวเลือกข้อมูล")
 selected_league_name = st.sidebar.selectbox("เลือกลีกที่ต้องการดู", list(LEAGUES.keys()))
 league_code = LEAGUES[selected_league_name]
 
 # ฟังก์ชันดึงข้อมูลแมตช์ทั้งหมดในฤดูกาลของลีกนั้น
-@st.cache_data(ttl=1800) # บันทึกข้อมูลไว้ 30 นาที
+@st.cache_data(ttl=1800)
 def get_season_matches(code):
     url = f"https://api.football-data.org/v4/competitions/{code}/matches"
     res = requests.get(url, headers=headers)
@@ -43,7 +43,6 @@ matches = get_season_matches(league_code)
 if not matches:
     st.warning("ไม่สามารถดึงข้อมูลลีกนี้ได้ หรือเกินโควต้า API ชั่วคราว (ลองรีเฟรชในอีก 1 นาที)")
 else:
-    # แปลงข้อมูลเป็น List เพื่อทำ DataFrame
     data_list = []
     matchdays = set()
 
@@ -71,10 +70,10 @@ else:
             status_th = "จบแล้ว"
         elif status in ["IN_PLAY", "PAUSED", "HALFTIME"]:
             score_str = f"{score_home} - {score_away}"
-            status_th = "🔴 กำลังแข่ง"
+            status_th = "กำลังแข่ง"
         else:
             score_str = "vs"
-            status_th = "⏳ รอนัดเตะ"
+            status_th = "รอนัดเตะ"
 
         data_list.append({
             "นัดที่ (Matchday)": matchday,
@@ -87,11 +86,10 @@ else:
 
     df = pd.DataFrame(data_list)
 
-    # ตัวกรองใน Sidebar: เลือกดูเฉพาะนัดที่ (Matchday) หรือดูทั้งหมด
     st.sidebar.markdown("---")
     view_option = st.sidebar.radio("รูปแบบการแสดงผล", ["แสดงทั้งหมดทั้งฤดูกาล", "กรองตามนัดที่ (Matchday)", "กรองตามสถานะ"])
 
-    st.subheader(f"📊 ตารางการแข่งขัน {selected_league_name}")
+    st.subheader(f"ตารางการแข่งขัน {selected_league_name}")
 
     if view_option == "กรองตามนัดที่ (Matchday)":
         sorted_matchdays = sorted(list(matchdays))
@@ -101,10 +99,9 @@ else:
         st.dataframe(filtered_df.drop(columns=["นัดที่ (Matchday)"]), use_container_width=True, hide_index=True)
 
     elif view_option == "กรองตามสถานะ":
-        status_choice = st.sidebar.selectbox("เลือกสถานะ", ["จบแล้ว", "⏳ รอนัดเตะ", "🔴 กำลังแข่ง"])
+        status_choice = st.sidebar.selectbox("เลือกสถานะ", ["จบแล้ว", "รอนัดเตะ", "กำลังแข่ง"])
         filtered_df = df[df["สถานะ"] == status_choice]
         st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
     else:
-        # แสดงตารางทั้งหมด
         st.dataframe(df, use_container_width=True, hide_index=True)
