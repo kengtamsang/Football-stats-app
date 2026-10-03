@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="AI Football Analyzer", page_icon="⚽", layout="wide")
 
@@ -14,12 +13,12 @@ if not api_token:
     st.error("กรุณาตั้งค่า FOOTBALL_API_TOKEN ใน Streamlit Secrets ก่อนใช้งาน")
     st.stop()
 
-# ตั้งค่า Timezone ประเทศไทย
-tz = pytz.timezone('Asia/Bangkok')
-now_th = datetime.now(tz)
+# ตั้งค่าเวลาไทย (UTC+7)
+tz_th = timezone(timedelta(hours=7))
+now_th = datetime.now(tz_th)
 st.caption(f"อัปเดตข้อมูลล่าสุด: {now_th.strftime('%Y-%m-%d %H:%M')}")
 
-# ดึงข้อมูลย้อนหลัง 1 วัน และล่วงหน้า 2 วัน (รวม 4 วัน) เพื่อไม่ให้พลาดแมตช์
+# ดึงข้อมูลย้อนหลัง 1 วัน และล่วงหน้า 2 วัน
 date_from = (now_th - timedelta(days=1)).strftime('%Y-%m-%d')
 date_to = (now_th + timedelta(days=2)).strftime('%Y-%m-%d')
 
@@ -35,7 +34,7 @@ try:
     if not matches:
         st.info("ไม่พบรายการแข่งขันในช่วงเวลานี้ในระบบ API")
     else:
-        st.success(f"พบลายการแข่งขันทั้งหมด {len(matches)} รายการ")
+        st.success(f"พบรายการแข่งขันทั้งหมด {len(matches)} รายการ")
         
         for match in matches:
             competition = match.get("competition", {}).get("name", "Unknown League")
@@ -44,9 +43,10 @@ try:
             status = match.get("status", "SCHEDULED")
             utc_date = match.get("utcDate", "")
             
-            # แปลงเวลาเป็นไทย
+            # แปลงเวลาเป็นเวลาไทย (UTC+7)
             if utc_date:
-                match_time = datetime.strptime(utc_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.utc).astimezone(tz)
+                utc_dt = datetime.strptime(utc_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                match_time = utc_dt.astimezone(tz_th)
                 time_str = match_time.strftime("%d/%m/%Y %H:%M น.")
             else:
                 time_str = "ไม่ระบุเวลา"
@@ -59,3 +59,4 @@ try:
 
 except Exception as e:
     st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+
